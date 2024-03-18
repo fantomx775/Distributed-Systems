@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather and Air Pollution Data</title>
+    <style>
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            margin-top: 20px;
+        }
+
+        .table-container {
+            margin: 0 20px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+
+        caption {
+            font-weight: bold;
+        }
+
+        .gpt{
+            max-width: 400px;
+            text-align: center;
+            margin: auto;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="table-container">
+        <h1>Weather Data for {{ city.capitalize() }}</h1>
+        <table border="1">
+            <caption>Weather Information</caption>
+            <thead>
+            <tr>
+                <th>Attribute</th>
+                <th>Value</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>Date</td>
+                <td>{{ date_time_data.date }}</td>
+            </tr>
+            <tr>
+                <td>Current time (local time)</td>
+                <td>{{ date_time_data.time }}</td>
+            </tr>
+            <tr>
+                <td>Time Zone</td>
+                <td>{{ date_time_data.timezone }}</td>
+            </tr>
+            <tr>
+                <td>Day of week</td>
+                <td>{{ date_time_data.day_of_week}}</td>
+            </tr>
+            <tr>
+                <td>Cloudiness (%)</td>
+                <td>{{ weather_data.cloud_pct }}</td>
+            </tr>
+            <tr>
+                <td>Feels Like (°C)</td>
+                <td>{{ weather_data.feels_like }}</td>
+            </tr>
+            <tr>
+                <td>Humidity (%)</td>
+                <td>{{ weather_data.humidity }}</td>
+            </tr>
+            <tr>
+                <td>Maximum Temperature (°C)</td>
+                <td>{{ weather_data.max_temp }}</td>
+            </tr>
+            <tr>
+                <td>Minimum Temperature (°C)</td>
+                <td>{{ weather_data.min_temp }}</td>
+            </tr>
+            <tr>
+                <td>Sunrise (local time)</td>
+                <td>{{ weather_data.sunrise }}</td>
+            </tr>
+            <tr>
+                <td>Sunset (local time)</td>
+                <td>{{ weather_data.sunset }}</td>
+            </tr>
+            <tr>
+                <td>Temperature (°C)</td>
+                <td>{{ weather_data.temp }}</td>
+            </tr>
+            <tr>
+                <td>Wind Degrees</td>
+                <td>{{ weather_data.wind_degrees }}</td>
+            </tr>
+            <tr>
+                <td>Wind Speed (m/s)</td>
+                <td>{{ weather_data.wind_speed }}</td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="table-container">
+        <h1>Air Pollution Data</h1>
+        <table border="1">
+            <caption>Air Pollution Information</caption>
+            <thead>
+            <tr>
+                <th>Parameter</th>
+                <th>Concentration</th>
+                <th>AQI</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr>
+                <td>CO</td>
+                <td>{{ air_pollution_data.CO.concentration }}</td>
+                <td>{{ air_pollution_data.CO.aqi }}</td>
+            </tr>
+            <tr>
+                <td>PM10</td>
+                <td>{{ air_pollution_data.PM10.concentration }}</td>
+                <td>{{ air_pollution_data.PM10.aqi }}</td>
+            </tr>
+            <tr>
+                <td>SO2</td>
+                <td>{{ air_pollution_data.SO2.concentration }}</td>
+                <td>{{ air_pollution_data.SO2.aqi }}</td>
+            </tr>
+            <tr>
+                <td>PM2.5</td>
+                <td>{{ air_pollution_data["PM2.5"].concentration }}</td>
+                <td>{{ air_pollution_data["PM2.5"].aqi }}</td>
+            </tr>
+            <tr>
+                <td>O3</td>
+                <td>{{ air_pollution_data.O3.concentration }}</td>
+                <td>{{ air_pollution_data.O3.aqi }}</td>
+            </tr>
+            <tr>
+                <td>NO2</td>
+                <td>{{ air_pollution_data.NO2.concentration }}</td>
+                <td>{{ air_pollution_data.NO2.aqi }}</td>
+            </tr>
+            <tr>
+                <td>Overall AQI</td>
+                <td colspan="2">{{ air_pollution_data.overall_aqi }}</td>
+            </tr>
+            </tbody>
+        </table>
+           <div class="gpt">
+        <p>{{ text_data }}</p>
+    </div>
+    </div>
+</div>
+<h2 style="text-align: center;">Walkscore: {{walk_score}}</h2>
+<p style="text-align: center;">(Definitely not go) 0 .......................... 100 (Defintely go)</p>
+
+
+</body>
+</html>
