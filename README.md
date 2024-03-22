@@ -6,6 +6,6 @@ This repository contains the codebase for the Distributed System cousre on AGH U
 
 ## Table of Contents:
 
-1. Chat server [sockets]
-2. Rest API [rest]
+1. Chat application [Sockets]
+2. Weather App calculating if you should go for a walk [Rest API]
 3. 
