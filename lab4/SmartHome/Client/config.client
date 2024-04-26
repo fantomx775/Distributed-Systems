@@ -1,0 +1,3 @@
+bulbulator=bulbulators/bulbulator1:tcp -h 127.0.0.2 -p 10000 -z : udp -h 127.0.0.2 -p 10000 -z
+light1=lights/light1:tcp -h 127.0.0.2 -p 10000 -z : udp -h 127.0.0.2 -p 10000 -z
+# END DEVICE DEFINITIONS
