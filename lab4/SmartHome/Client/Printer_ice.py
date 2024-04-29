@@ -447,9 +447,9 @@ if 'LightControllerPrx' not in _M_Demo.__dict__:
     LightController._ice_type = _M_Demo._t_LightControllerDisp
 
     LightController._op_setBrightness = IcePy.Operation('setBrightness', Ice.OperationMode.Normal, Ice.OperationMode.Normal, False, None, (), (((), IcePy._t_int, False, 0),), (), None, ())
-    LightController._op_getBrightness = IcePy.Operation('getBrightness', Ice.OperationMode.Normal, Ice.OperationMode.Normal, False, None, (), (), (), None, ())
+    LightController._op_getBrightness = IcePy.Operation('getBrightness', Ice.OperationMode.Normal, Ice.OperationMode.Normal, False, None, (), (), (), ((), IcePy._t_int, False, 0), ())
     LightController._op_setColor = IcePy.Operation('setColor', Ice.OperationMode.Normal, Ice.OperationMode.Normal, False, None, (), (((), _M_Demo._t_Color, False, 0),), (), None, ())
-    LightController._op_getColor = IcePy.Operation('getColor', Ice.OperationMode.Normal, Ice.OperationMode.Normal, False, None, (), (), (), None, ())
+    LightController._op_getColor = IcePy.Operation('getColor', Ice.OperationMode.Normal, Ice.OperationMode.Normal, False, None, (), (), (), ((), _M_Demo._t_Color, False, 0), ())
 
     _M_Demo.LightController = LightController
     del LightController

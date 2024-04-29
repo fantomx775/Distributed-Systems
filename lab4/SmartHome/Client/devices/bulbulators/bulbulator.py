@@ -31,11 +31,23 @@ class Bulbulator:
                 case 'get state':
                     print(self.proxy.getState())
                 case 'bulbulate':
-                    buls_no = input("\nInput numbers of buls: ")
-                    bulbs = self.proxy.bulbulate(int(buls_no))
-                    for bul in bulbs.split(' '):
-                        print(bul, end=' ')
-                        time.sleep(0.1)
+                    while True:
+                        buls_no = input("\nInput numbers of bulbs (or press Enter to quit): ")
+                        if buls_no == '':
+                            print("Action canceled.")
+                            break
+                        try:
+                            buls_no = int(buls_no)
+                            break
+                        except ValueError:
+                            print("Please enter a valid integer.")
+
+                    if buls_no != '':
+                        bulbs = self.proxy.bulbulate(buls_no)
+                        for bul in bulbs.split(' '):
+                            print(bul, end=' ')
+                            time.sleep(0.1)
+
                 case _:
                     print("Invalid action:", action)
         except Exception as e:

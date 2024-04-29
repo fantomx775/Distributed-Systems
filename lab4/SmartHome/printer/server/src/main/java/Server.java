@@ -1,4 +1,5 @@
 import Servants.Bulbulator.BulbulatorI;
+import Servants.Lights.DimmerI;
 import Servants.Lights.NormalLightI;
 import com.zeroc.Ice.Communicator;
 import com.zeroc.Ice.ObjectAdapter;
@@ -16,9 +17,11 @@ public class Server
 
             BulbulatorI bulbulator = new BulbulatorI();
             NormalLightI light = new NormalLightI();
+            DimmerI dimmer = new DimmerI();
 
             adapter.add(light, new Identity("light1", "lights"));
             adapter.add(bulbulator, new Identity("bulbulator1", "bulbulators"));
+            adapter.add(dimmer, new Identity("dimmer1", "lights"));
             adapter.activate();
 
             System.out.println("Entering event processing loop...");

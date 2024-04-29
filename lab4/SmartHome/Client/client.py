@@ -1,6 +1,5 @@
 import sys, Ice
-import Demo
-from devices.bulbulator import Bulbulator
+from devices.bulbulators.bulbulator import Bulbulator
 from devices.lights import Lights
 
 def get_proxies(communicator, config_file = "config.client"):
