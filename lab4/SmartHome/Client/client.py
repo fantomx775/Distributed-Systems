@@ -1,7 +1,7 @@
 import sys, Ice
 from devices.bulbulators.bulbulator import Bulbulator
-from devices.lights import Lights
-
+from devices.lights.lights import Lights
+from devices.lights.dimmer import Dimmer
 def get_proxies(communicator, config_file = "config.client"):
     devices = {}
     with open(config_file) as file:
@@ -20,24 +20,26 @@ def get_proxies(communicator, config_file = "config.client"):
                 devices['bulbulator'] = Bulbulator(name, communicator, url)
             elif "light1" in name:
                 devices['light1'] = Lights(name, communicator, url)
+            elif "dimmer1" in name:
+                devices['dimmer1'] = Dimmer(name, communicator, url)
             else:
                 raise ValueError("Device", name, " not recognized.")
 
     return devices
 
-with Ice.initialize(sys.argv) as communicator:
-    devs = get_proxies(communicator)
-    a= ''' base = communicator.stringToProxy("bulbulators/bulbulator1:tcp -h 127.0.0.2 -p 10000 -z : udp -h 127.0.0.2 -p 10000 -z")
-    bb = Demo.BulbulatorPrx.checkedCast(base)
-    buls = bb.bulbulate(int(10))
-    print(buls) '''
-
-    # base = communicator.stringToProxy(("lights/light1:tcp -h 127.0.0.2 -p 10000 -z : udp -h 127.0.0.2 -p 10000 -z"))
-    # light = Demo.LightPrx.checkedCast(base)
-    devs['light1'].get_proxy().turnOn()
-    print(devs['light1'].get_proxy().getState())
-    devs['light1'].get_proxy().turnOff()
-    print(devs['light1'].get_proxy().getState())
+# with Ice.initialize(sys.argv) as communicator:
+#     devs = get_proxies(communicator)
+#     a= ''' base = communicator.stringToProxy("bulbulators/bulbulator1:tcp -h 127.0.0.2 -p 10000 -z : udp -h 127.0.0.2 -p 10000 -z")
+#     bb = Demo.BulbulatorPrx.checkedCast(base)
+#     buls = bb.bulbulate(int(10))
+#     print(buls) '''
+#
+#     # base = communicator.stringToProxy(("lights/light1:tcp -h 127.0.0.2 -p 10000 -z : udp -h 127.0.0.2 -p 10000 -z"))
+#     # light = Demo.LightPrx.checkedCast(base)
+#     devs['light1'].get_proxy().turnOn()
+#     print(devs['light1'].get_proxy().getState())
+#     devs['light1'].get_proxy().turnOff()
+#     print(devs['light1'].get_proxy().getState())
 
     # while True:
     #     b = input()

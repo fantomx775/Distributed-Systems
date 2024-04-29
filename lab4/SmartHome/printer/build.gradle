@@ -6,6 +6,7 @@ plugins {
 }
 
 subprojects {
+
     //
     // Apply Java and Ice Builder plug-ins to all sub-projects
     //
