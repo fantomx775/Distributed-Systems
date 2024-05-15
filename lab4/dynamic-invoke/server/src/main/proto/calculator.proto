@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "org.example.gen";
+option java_outer_classname = "CalculatorProto";
+
+package calculator;
+
+message ArithmeticOpArguments {
+  int32 arg1 = 1;
+  int32 arg2 = 2;
+}
+
+message ArithmeticOpResult {
+  int32 res = 1;
+}
+
+message BatchOperationRequest {
+  repeated ComplexArithmeticOpArguments operations = 1;
+}
+
+message BatchOperationResult {
+  repeated ComplexArithmeticOpResult results = 1;
+}
+
+service Calculator {
+  rpc Add (ArithmeticOpArguments) returns (ArithmeticOpResult) {}
+  rpc Subtract (ArithmeticOpArguments) returns (ArithmeticOpResult) {}
+  rpc ComplexOperation (ComplexArithmeticOpArguments) returns (ComplexArithmeticOpResult) {}
+  rpc PerformBatchOperation (BatchOperationRequest) returns (BatchOperationResult) {}
+}
+
+enum OperationType {
+  SUM = 0;
+  AVG = 1;
+  MIN = 2;
+  MAX = 3;
+}
+
+message ComplexArithmeticOpArguments {
+  OperationType optype = 1;
+  repeated double args = 2;
+}
+
+message ComplexArithmeticOpResult {
+  double res = 1;
+}

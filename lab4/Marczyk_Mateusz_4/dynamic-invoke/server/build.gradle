@@ -1,0 +1,41 @@
+plugins {
+//    id 'com.google.protobuf' version '0.9.4'
+    id 'java'
+}
+
+group = 'org.calc'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    maven {
+        url "https://maven-central.storage-download.googleapis.com/maven2/" }
+    mavenCentral()
+}
+
+def grpcVersion = '1.62.2'
+def protocVersion = '3.25.3'
+
+dependencies {
+    implementation "io.grpc:grpc-protobuf:${grpcVersion}"
+    implementation "io.grpc:grpc-services:${grpcVersion}"
+    implementation "io.grpc:grpc-stub:${grpcVersion}"
+    implementation "io.grpc:grpc-netty-shaded:${grpcVersion}"
+    compileOnly "org.apache.tomcat:annotations-api:6.0.53"
+
+    testImplementation platform('org.junit:junit-bom:5.9.1')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+}
+
+//protobuf {
+//    protoc { artifact = "com.google.protobuf:protoc:${protocVersion}" }
+//    plugins {
+//        grpc { artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}" }
+//    }
+//    generateProtoTasks {
+//        all()*.plugins { grpc {} }
+//    }
+//}
+
+test {
+    useJUnitPlatform()
+}

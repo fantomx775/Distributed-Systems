@@ -1,13 +1,69 @@
 module Demo
 {
+
+    exception ValueOutOfRangeException
+    { string reason; };
+
+    exception UnsupportedColorException
+    { string reason; };
+
+    exception UnsupportedFragranceException
+    { string reason; };
+
     interface Printer
     {
         void printString(string s);
     }
 
-    interface Bulbulator
+    interface Device
+    {
+        void turnOn();
+        void turnOff();
+        bool getState();
+    }
+
+    interface Bulbulator extends Device
     {
         string bulbulate(int b);
+    }
+
+    enum Fragrance
+    {
+        LAVENDER,
+        CITRUS,
+        VANILLA,
+        ROSE,
+        OCEAN,
+        FRESHLINEN,
+        SANDALWOOD,
+        JASMINE,
+        PEPPERMINT,
+        EUCALYPTUS,
+    }
+
+    sequence<Fragrance> Fragrances;
+
+    struct ScheduleBlock
+    {
+        string startTime;
+        string endTime;
+        int temperature;
+        int humidity;
+        Fragrances fragrances;
+    }
+
+    sequence<ScheduleBlock> Schedules;
+
+    interface HVAC extends Device
+    {
+            void setTemperature(int t) throws ValueOutOfRangeException;
+            int getTemperature();
+            void setHumidity(int h) throws ValueOutOfRangeException;
+            int getHumidity();
+            void setFragrances(Fragrances f) throws UnsupportedFragranceException;
+            Fragrances getFragrances();
+            void addSchedule(ScheduleBlock s) throws ValueOutOfRangeException, UnsupportedFragranceException;
+            Schedules getSchedules();
     }
 
     enum Color
@@ -26,32 +82,15 @@ module Demo
 
     sequence<Color> Colors;
 
-    interface Light
+    interface Light extends Device
     {
-        void turnOn();
-        void turnOff();
-        bool getState();
     }
 
-    class NormalLight implements Light
+    interface LightController extends Device
     {
-        bool state;
-    }
-
-    interface LightController
-    {
-        void setBrightness(int b);
+        void setBrightness(int b) throws ValueOutOfRangeException;
         int getBrightness();
-        void setColor(Color c);
+        void setColor(Color c) throws UnsupportedColorException;
         Color getColor();
-    }
-
-    class Dimmer implements Light, LightController
-    {
-        bool state;
-        int brightness;
-        Colors colors;
-        Color color;
-
     }
 }
