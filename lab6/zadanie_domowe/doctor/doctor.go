@@ -1,55 +1,82 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 	"log"
-	"strconv"
+	"math/rand"
+	"os"
+	utils "rabbit"
+	"strings"
 	"sync"
 	"time"
 )
 
-func failOnError(err error, msg string) {
-	if err != nil {
-		log.Fatalf("%s: %s", msg, err)
-	}
-}
+var operations = []string{"knee", "elbow", "hip"}
+var messages = []string{"Kowalski", "Nowak", "Chujak"}
 
-func sendMessage(ch *amqp.Channel, exchange string, key string, body string) {
-	err := ch.Publish(
-		exchange, // exchange
-		key,      // routing key
-		false,    // mandatory
-		false,    // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(body),
-		})
-	failOnError(err, "Failed to publish a message")
-	log.Printf(" [x] Sent %s", body)
-}
+type OperationType string
+
+const (
+	Knee  OperationType = "knee"
+	Elbow OperationType = "elbow"
+	Hip   OperationType = "hip"
+)
 
 func main() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	failOnError(err, "Failed to connect to RabbitMQ")
+	doctorId := uuid.New().String()
+
+	conn, err := amqp.Dial(utils.RabbitMQURL)
+	utils.FailOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
 
 	ch, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
+	utils.FailOnError(err, "Failed to open a channel")
 	defer ch.Close()
 
-	err = ch.ExchangeDeclare(
-		"operations_exchange", // name
-		"direct",              // type
-		true,                  // durable
-		false,                 // auto-deleted
-		false,                 // internal
-		false,                 // no-wait
-		nil,                   // arguments
-	)
-	failOnError(err, "Failed to declare the exchange")
+	setupExchanges(ch)
+	doctorQueueName := setupDoctorQueue(ch, doctorId)
+	adminQueueName := setupAdminQueue(ch)
 
-	doctorID := "doctor1"
-	doctorQueueName := "doctor_queue_" + doctorID
+	var wg sync.WaitGroup
+	wg.Add(4)
+
+	go consumeDoctorQueue(&wg, ch, doctorQueueName)
+	//go publishMessages(&wg, ch, doctorId)
+	go consumeAdminQueue(&wg, ch, adminQueueName)
+	go manualMessageInput(&wg, ch, doctorId)
+
+	wg.Wait() // Wait for all goroutines to finish
+}
+
+func setupExchanges(ch *amqp.Channel) {
+	err := ch.ExchangeDeclare(
+		utils.OperationsExchange,
+		utils.OperationsExchangeType,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to declare the operations exchange")
+
+	err = ch.ExchangeDeclare(
+		utils.AdministrationExchange,
+		utils.AdministrationExchangeType,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to declare the administration exchange")
+}
+
+func setupDoctorQueue(ch *amqp.Channel, doctorId string) string {
+	doctorQueueName := "doctor_queue_" + doctorId
 	q, err := ch.QueueDeclare(
 		doctorQueueName,
 		false,
@@ -58,98 +85,137 @@ func main() {
 		false,
 		nil,
 	)
-	failOnError(err, "Failed to declare a queue")
-
-	var wg sync.WaitGroup
-	wg.Add(3) // Add 2 because we have 2 goroutines
-
-	go func() {
-		defer wg.Done()
-		msgs, err := ch.Consume(
-			q.Name, // queue
-			"",     // consumer
-			true,   // auto-ack
-			false,  // exclusive
-			false,  // no-local
-			false,  // no-wait
-			nil,    // args
-		)
-		failOnError(err, "Failed to register a consumer")
-		log.Println("Receiving")
-
-		for d := range msgs {
-			log.Printf("Received a message: %s", d.Body)
-		}
-	}()
-
-	// operations := []string{"knee", "elbow", "hip"}
-	operations := []string{"knee"}
-
-	messages := []string{
-		doctorID + " Kowalski",
-		// doctorID + " Nowak",
-		// doctorID + " Chujak",
-	}
-	number := 0
-	go func() {
-		defer wg.Done()
-		for {
-			for i, op := range operations {
-				number++
-				sendMessage(ch, "operations_exchange", op, messages[i]+strconv.Itoa(number))
-			}
-			time.Sleep(10 * time.Second)
-		}
-	}()
-
-	// Setup administration exchange and queue
-	err = ch.ExchangeDeclare(
-		"administration", // name
-		"fanout",         // type
-		true,             // durable
-		false,            // auto-deleted
-		false,            // internal
-		false,            // no-wait
-		nil,              // arguments
-	)
-	failOnError(err, "Failed to declare the administration exchange")
-
-	adminQueue, err := ch.QueueDeclare(
-		"admin_queue", // name
-		false,         // durable
-		false,         // delete when unused
-		false,         // exclusive
-		false,         // no-wait
-		nil,           // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
+	utils.FailOnError(err, "Failed to declare the doctor queue")
 
 	err = ch.QueueBind(
-		adminQueue.Name,  // queue name
-		"",               // routing key
-		"administration", // exchange
-		false,            // no-wait
-		nil,              // arguments
+		q.Name,
+		doctorId,
+		utils.OperationsExchange,
+		false,
+		nil,
 	)
-	failOnError(err, "Failed to bind a queue")
+	utils.FailOnError(err, "Failed to bind the doctor queue")
 
-	go func() {
-		defer wg.Done()
-		msgs, err := ch.Consume(
-			adminQueue.Name,
-			"",
-			true,
-			false,
-			false,
-			false,
-			nil,
-		)
-		failOnError(err, "Failed to register a consumer")
+	return doctorQueueName
+}
 
-		for d := range msgs {
-			log.Printf("Admin message received: %s", d.Body)
+func setupAdminQueue(ch *amqp.Channel) string {
+	q, err := ch.QueueDeclare(
+		"admin_queue_doctor",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to declare the admin queue")
+
+	err = ch.QueueBind(
+		q.Name,
+		"",
+		utils.AdministrationExchange,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to bind the admin queue")
+
+	return q.Name
+}
+
+func consumeDoctorQueue(wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
+	defer wg.Done()
+	msgs, err := ch.Consume(
+		queueName,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to register a consumer")
+
+	for d := range msgs {
+		log.Printf("Received a message from technic: %s", d.Body)
+	}
+}
+
+func consumeAdminQueue(wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
+	defer wg.Done()
+	msgs, err := ch.Consume(
+		queueName,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to register a consumer")
+
+	for d := range msgs {
+		log.Printf("Admin message received: %s", d.Body)
+	}
+}
+
+func publishMessages(wg *sync.WaitGroup, ch *amqp.Channel, doctorId string) {
+	defer wg.Done()
+	for {
+		randomIndexOp := rand.Intn(len(operations))
+		randomIndexMsg := rand.Intn(len(messages))
+		randomOperation := operations[randomIndexOp]
+		randomName := messages[randomIndexMsg]
+
+		utils.SendMessage(ch, utils.OperationsExchange, randomOperation, randomName+" "+randomOperation, doctorId, true)
+		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, randomName+" "+randomOperation, doctorId, false)
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func manualMessageInput(wg *sync.WaitGroup, ch *amqp.Channel, doctorId string) {
+	defer wg.Done()
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Enter the surname: ")
+		surname, err := reader.ReadString('\n')
+		utils.FailOnError(err, "Failed to read from stdin")
+
+		surname = strings.TrimSpace(surname)
+		if surname == "" {
+			log.Println("Surname cannot be empty. Please enter a valid surname.")
+			continue
 		}
-	}()
+		operation := ""
 
-	wg.Wait() // Wait for all goroutines to finish
+		for {
+			validInput := true
+			fmt.Println("Operation types:")
+			fmt.Println("1. Knee")
+			fmt.Println("2. Elbow")
+			fmt.Println("3. Hip")
+			fmt.Print("Enter the type of operation: ")
+
+			number, err := reader.ReadString('\n')
+			number = strings.TrimSpace(number)
+			utils.FailOnError(err, "Failed to read from stdin")
+			switch number {
+			case "1":
+				operation = "knee"
+			case "2":
+				operation = "elbow"
+			case "3":
+				operation = "hip"
+			default:
+				fmt.Println("Invalid number:", number, ". Please choose 1, 2, or 3.")
+				validInput = false
+			}
+			if validInput {
+				break
+			}
+		}
+
+		message := surname + " " + operation
+		utils.SendMessage(ch, utils.OperationsExchange, operation, message, doctorId, true)
+		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, message, doctorId, false)
+	}
 }

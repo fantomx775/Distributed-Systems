@@ -3,16 +3,16 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/streadway/amqp"
 	"log"
 	"math/rand"
 	"os"
+	utils "rabbit"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/streadway/amqp"
-	utils "rabbit"
 )
 
 type OperationType string
@@ -82,22 +82,10 @@ func readInput() (OperationType, OperationType) {
 	}
 }
 
-func sendMessageToDoctor(ch *amqp.Channel, message string, doctorID string) {
-	err := ch.Publish(
-		"",                       // exchange
-		"doctor_queue_"+doctorID, // routing key
-		false,                    // mandatory
-		false,                    // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(message),
-		})
-	utils.FailOnError(err, "Failed to send message back to doctor")
-	fmt.Println(" [x] Sent message to doctor: ", message)
-}
-
 func main() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	technicId := uuid.New().String()
+
+	conn, err := amqp.Dial(utils.RabbitMQURL)
 	utils.FailOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
 
@@ -107,158 +95,149 @@ func main() {
 
 	operation1, operation2 := readInput()
 
-	// Declare a direct exchange
-	err = ch.ExchangeDeclare(
-		"operations_exchange", // name
-		"direct",              // type
-		true,                  // durable
-		false,                 // auto-deleted
-		false,                 // internal
-		false,                 // no-wait
-		nil,                   // arguments
-	)
-	utils.FailOnError(err, "Failed to declare the exchange")
+	setupExchanges(ch)
+	queue1 := setupQueue(ch, operation1)
+	queue2 := setupQueue(ch, operation2)
+	bindQueue(ch, queue1, operation1)
+	bindQueue(ch, queue2, operation2)
 
-	// Declare two queues
-	queue1, err := ch.QueueDeclare(
-		string(operation1), // name
-		true,               // durable
-		false,              // delete when unused
-		false,              // exclusive
-		false,              // no-wait
-		nil,                // arguments
-	)
-	utils.FailOnError(err, "Failed to declare the queue 1")
+	setQoS(ch)
 
-	queue2, err := ch.QueueDeclare(
-		string(operation2), // name
-		true,               // durable
-		false,              // delete when unused
-		false,              // exclusive
-		false,              // no-wait
-		nil,                // arguments
-	)
-	utils.FailOnError(err, "Failed to declare the queue 2")
-
-	// Bind queues to the exchange with routing keys
-	err = ch.QueueBind(
-		queue1.Name,           // queue name
-		string(operation1),    // routing key
-		"operations_exchange", // exchange
-		false,
-		nil,
-	)
-	utils.FailOnError(err, "Failed to bind the queue 1")
-
-	err = ch.QueueBind(
-		queue2.Name,           // queue name
-		string(operation2),    // routing key
-		"operations_exchange", // exchange
-		false,
-		nil,
-	)
-	utils.FailOnError(err, "Failed to bind the queue 2")
-
-	// Create consumers to read messages from the queues
-	err = ch.Qos(
-		1,     // prefetch count
-		0,     // prefetch size
-		false, // global
-	)
-	utils.FailOnError(err, "Failed to set QoS")
-	msgs1, err := ch.Consume(
-		queue1.Name, // queue
-		"",          // consumer
-		true,        // auto-ack
-		false,       // exclusive
-		false,       // no-local
-		false,       // no-wait
-		nil,         // args
-	)
-	utils.FailOnError(err, "Failed to register a consumer for queue 1")
-
-	msgs2, err := ch.Consume(
-		queue2.Name, // queue
-		"",          // consumer
-		true,        // auto-ack
-		false,       // exclusive
-		false,       // no-local
-		false,       // no-wait
-		nil,         // args
-	)
-	utils.FailOnError(err, "Failed to register a consumer for queue 2")
+	msgs1 := consumeQueue(ch, queue1)
+	msgs2 := consumeQueue(ch, queue2)
 
 	rand.Seed(time.Now().UnixNano())
-
 	var mu sync.Mutex
 
-	processMessage := func(d amqp.Delivery, operation OperationType) {
-		mu.Lock()
-		defer mu.Unlock()
-		log.Printf("Received a message from %s queue: %s", operation, d.Body)
-		res := strings.Split(string(d.Body), " ")
-		time.Sleep(time.Duration(rand.Intn(10)+1) * time.Second)
-		sendMessageToDoctor(ch, res[1]+" "+string(operation)+" DONE", res[0])
-	}
+	go processMessages(msgs1, operation1, technicId, ch, &mu)
+	go processMessages(msgs2, operation2, technicId, ch, &mu)
 
-	go func() {
-		for {
-			select {
-			case d := <-msgs1:
-				processMessage(d, operation1)
-			case d := <-msgs2:
-				processMessage(d, operation2)
-			}
-		}
-	}()
-	// Setup administration exchange and queue
-	err = ch.ExchangeDeclare(
-		"administration", // name
-		"fanout",         // type
-		true,             // durable
-		false,            // auto-deleted
-		false,            // internal
-		false,            // no-wait
-		nil,              // arguments
+	setupAdminExchange(ch)
+	adminQueue := setupAdminQueue(ch)
+	go consumeAdminQueue(ch, adminQueue)
+
+	select {}
+}
+
+func setupExchanges(ch *amqp.Channel) {
+	err := ch.ExchangeDeclare(
+		utils.OperationsExchange,
+		utils.OperationsExchangeType,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to declare the operations exchange")
+}
+
+func setupQueue(ch *amqp.Channel, operation OperationType) amqp.Queue {
+	queue, err := ch.QueueDeclare(
+		string(operation),
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to declare the queue")
+	return queue
+}
+
+func bindQueue(ch *amqp.Channel, queue amqp.Queue, operation OperationType) {
+	err := ch.QueueBind(
+		queue.Name,
+		string(operation),
+		utils.OperationsExchange,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to bind the queue")
+}
+
+func setQoS(ch *amqp.Channel) {
+	err := ch.Qos(
+		1,
+		0,
+		false,
+	)
+	utils.FailOnError(err, "Failed to set QoS")
+}
+
+func consumeQueue(ch *amqp.Channel, queue amqp.Queue) <-chan amqp.Delivery {
+	msgs, err := ch.Consume(
+		queue.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to register a consumer")
+	return msgs
+}
+
+func processMessages(msgs <-chan amqp.Delivery, operation OperationType, technicId string, ch *amqp.Channel, mu *sync.Mutex) {
+	for d := range msgs {
+		mu.Lock()
+		log.Printf("Received a message: %s", d.Body)
+		//time.Sleep(time.Duration(rand.Intn(10)+1) * time.Second)
+		time.Sleep(10 * time.Second)
+		utils.SendMessage(ch, utils.OperationsExchange, d.ReplyTo, string(d.Body)+" DONE", technicId, true)
+		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, string(d.Body)+" "+string(operation)+" DONE", technicId, false)
+		mu.Unlock()
+	}
+}
+
+func setupAdminExchange(ch *amqp.Channel) {
+	err := ch.ExchangeDeclare(
+		utils.AdministrationExchange,
+		utils.AdministrationExchangeType,
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	utils.FailOnError(err, "Failed to declare the administration exchange")
+}
 
+func setupAdminQueue(ch *amqp.Channel) amqp.Queue {
 	adminQueue, err := ch.QueueDeclare(
-		"admin_queue", // name
-		false,         // durable
-		false,         // delete when unused
-		false,         // exclusive
-		false,         // no-wait
-		nil,           // arguments
+		"admin_queue_technic",
+		false,
+		false,
+		false,
+		false,
+		nil,
 	)
-	utils.FailOnError(err, "Failed to declare a queue")
-
+	utils.FailOnError(err, "Failed to declare the admin queue")
 	err = ch.QueueBind(
-		adminQueue.Name,  // queue name
-		"",               // routing key
-		"administration", // exchange
-		false,            // no-wait
-		nil,              // arguments
+		adminQueue.Name,
+		"",
+		utils.AdministrationExchange,
+		false,
+		nil,
 	)
-	utils.FailOnError(err, "Failed to bind a queue")
+	utils.FailOnError(err, "Failed to bind the admin queue")
+	return adminQueue
+}
 
-	go func() {
-		//defer wg.Done()
-		msgs, err := ch.Consume(
-			adminQueue.Name,
-			"",
-			true,
-			false,
-			false,
-			false,
-			nil,
-		)
-		utils.FailOnError(err, "Failed to register a consumer")
+func consumeAdminQueue(ch *amqp.Channel, adminQueue amqp.Queue) {
+	msgs, err := ch.Consume(
+		adminQueue.Name,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to register a consumer for admin queue")
 
-		for d := range msgs {
-			log.Printf("Admin message received: %s", d.Body)
-		}
-	}()
-	// Block forever
-	select {}
+	for d := range msgs {
+		log.Printf("Admin message received: %s", d.Body)
+	}
 }

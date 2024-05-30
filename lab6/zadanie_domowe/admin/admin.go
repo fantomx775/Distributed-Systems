@@ -9,137 +9,125 @@ import (
 	"sync"
 )
 
+// Constants for RabbitMQ connection details
+const (
+	loggingQueueName = "logging"
+)
+
 func main() {
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
-	utils.FailOnError(err, "Failed to connect to RabbitMQ")
+	conn, ch := setupRabbitMQ()
 	defer conn.Close()
+	defer ch.Close()
+
+	setupExchanges(ch)
+	loggingQueue := setupLoggingQueue(ch)
+
+	var wg sync.WaitGroup
+	wg.Add(2) // Add 2 because we have 2 goroutines
+
+	go consumeLoggingQueue(ch, loggingQueue.Name, &wg)
+	go readAndPublishAdminMessages(ch, &wg)
+
+	select {} // Block forever
+}
+
+// setupRabbitMQ initializes the connection and channel for RabbitMQ
+func setupRabbitMQ() (*amqp.Connection, *amqp.Channel) {
+	conn, err := amqp.Dial(utils.RabbitMQURL)
+	utils.FailOnError(err, "Failed to connect to RabbitMQ")
 
 	ch, err := conn.Channel()
 	utils.FailOnError(err, "Failed to open the channel")
-	defer ch.Close()
 
-	err = ch.ExchangeDeclare(
-		"administration", // name
-		"fanout",         // type
-		true,             // durable
-		false,            // auto-deleted
-		false,            // internal
-		false,            // no-wait
-		nil,              // arguments
-	)
+	return conn, ch
+}
 
-	utils.FailOnError(err, "Failed to declare the administration exchange")
-
-	logQueue, err := ch.QueueDeclare(
-		"",    // name
-		false, // durable
-		false, // delete when unused
-		true,  // exclusive
-		false, // no-wait
-		nil,   // arguments
-	)
-	utils.FailOnError(err, "Failed to declare a queue")
-
-	err = ch.QueueBind(
-		logQueue.Name,    // queue name
-		"",               // routing key
-		"administration", // exchange
-		false,            // no-wait
-		nil,              // arguments
-	)
-	utils.FailOnError(err, "Failed to bind a queue")
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Read from the adminQueue
-	go func() {
-		defer wg.Done()
-		msgs, err := ch.Consume(
-			logQueue.Name,
-			"",
-			true,
-			false,
-			false,
-			false,
-			nil,
-		)
-		utils.FailOnError(err, "Failed to register a consumer")
-
-		for d := range msgs {
-			log.Printf(" [x] %s", d.Body)
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		reader := bufio.NewReader(os.Stdin)
-
-		for {
-			input, err := reader.ReadString('\n')
-			utils.FailOnError(err, "Failed to read from stdin")
-			err = ch.Publish(
-				"administration",
-				"",
-				false,
-				false,
-				amqp.Publishing{
-					ContentType: "text/plain",
-					Body:        []byte(input),
-				},
-			)
-			utils.FailOnError(err, "Failed to publish a message")
-		}
-	}()
-
-	// Setup administration exchange and queue
-	err = ch.ExchangeDeclare(
-		"administration", // name
-		"fanout",         // type
-		true,             // durable
-		false,            // auto-deleted
-		false,            // internal
-		false,            // no-wait
-		nil,              // arguments
+// setupExchanges declares the necessary exchanges for the application
+func setupExchanges(ch *amqp.Channel) {
+	err := ch.ExchangeDeclare(
+		utils.AdministrationExchange,
+		utils.AdministrationExchangeType,
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
 	utils.FailOnError(err, "Failed to declare the administration exchange")
 
-	adminQueue, err := ch.QueueDeclare(
-		"admin_queue", // name
-		false,         // durable
-		false,         // delete when unused
-		false,         // exclusive
-		false,         // no-wait
-		nil,           // arguments
+	err = ch.ExchangeDeclare(
+		utils.OperationsExchange,
+		utils.OperationsExchangeType,
+		true,
+		false,
+		false,
+		false,
+		nil,
 	)
-	utils.FailOnError(err, "Failed to declare a queue")
+	utils.FailOnError(err, "Failed to declare the operations exchange")
+}
+
+// setupLoggingQueue declares and binds the logging queue to the operations exchange
+func setupLoggingQueue(ch *amqp.Channel) amqp.Queue {
+	loggingQueue, err := ch.QueueDeclare(
+		loggingQueueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to declare the logging queue")
 
 	err = ch.QueueBind(
-		adminQueue.Name,  // queue name
-		"",               // routing key
-		"administration", // exchange
-		false,            // no-wait
-		nil,              // arguments
+		loggingQueue.Name,
+		loggingQueue.Name,
+		utils.OperationsExchange,
+		false,
+		nil,
 	)
-	utils.FailOnError(err, "Failed to bind a queue")
+	utils.FailOnError(err, "Failed to bind the logging queue")
 
-	go func() {
-		defer wg.Done()
-		msgs, err := ch.Consume(
-			adminQueue.Name,
+	return loggingQueue
+}
+
+// consumeLoggingQueue consumes messages from the logging queue and logs them
+func consumeLoggingQueue(ch *amqp.Channel, queueName string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	msgs, err := ch.Consume(
+		queueName,
+		"",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	utils.FailOnError(err, "Failed to register a consumer")
+
+	for d := range msgs {
+		log.Print(string(d.Body))
+	}
+}
+
+// readAndPublishAdminMessages reads input from stdin and publishes it to the administration exchange
+func readAndPublishAdminMessages(ch *amqp.Channel, wg *sync.WaitGroup) {
+	defer wg.Done()
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		input, err := reader.ReadString('\n')
+		utils.FailOnError(err, "Failed to read from stdin")
+		err = ch.Publish(
+			utils.AdministrationExchange,
 			"",
-			true,
 			false,
 			false,
-			false,
-			nil,
+			amqp.Publishing{
+				ContentType: "text/plain",
+				Body:        []byte(input),
+			},
 		)
-		utils.FailOnError(err, "Failed to register a consumer")
-
-		for d := range msgs {
-			log.Printf("Admin message received: %s", d.Body)
-		}
-	}()
-	select {}
-
+		utils.FailOnError(err, "Failed to publish a message")
+	}
 }
