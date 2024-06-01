@@ -112,7 +112,7 @@ func setupAdminQueue(ch *amqp.Channel) string {
 
 	err = ch.QueueBind(
 		q.Name,
-		"",
+		utils.LOGGING_KEY+".*",
 		utils.AdministrationExchange,
 		false,
 		nil,

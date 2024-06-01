@@ -8,7 +8,7 @@ import (
 const (
 	RabbitMQURL                = "amqp://guest:guest@localhost:5672/"
 	OperationsExchange         = "operations_exchange"
-	OperationsExchangeType     = "direct"
+	OperationsExchangeType     = "topic"
 	AdministrationExchange     = "administration"
 	AdministrationExchangeType = "fanout"
 	LOGGING_KEY                = "logging"

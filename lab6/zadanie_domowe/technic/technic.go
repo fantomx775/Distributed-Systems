@@ -169,7 +169,7 @@ func consumeQueue(ch *amqp.Channel, queue amqp.Queue) <-chan amqp.Delivery {
 	msgs, err := ch.Consume(
 		queue.Name,
 		"",
-		true,
+		false,
 		false,
 		false,
 		false,
@@ -184,9 +184,10 @@ func processMessages(msgs <-chan amqp.Delivery, operation OperationType, technic
 		mu.Lock()
 		log.Printf("Received a message: %s", d.Body)
 		//time.Sleep(time.Duration(rand.Intn(10)+1) * time.Second)
-		time.Sleep(10 * time.Second)
+		time.Sleep(20 * time.Second)
 		utils.SendMessage(ch, utils.OperationsExchange, d.ReplyTo, string(d.Body)+" DONE", technicId, true)
-		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, string(d.Body)+" "+string(operation)+" DONE", technicId, false)
+		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, string(d.Body)+" DONE", technicId, false)
+		d.Ack(false)
 		mu.Unlock()
 	}
 }

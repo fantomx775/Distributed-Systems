@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 	"log"
 	"os"
@@ -15,12 +16,14 @@ const (
 )
 
 func main() {
+	adminId := uuid.New().String()
+
 	conn, ch := setupRabbitMQ()
 	defer conn.Close()
 	defer ch.Close()
 
 	setupExchanges(ch)
-	loggingQueue := setupLoggingQueue(ch)
+	loggingQueue := setupLoggingQueue(ch, adminId)
 
 	var wg sync.WaitGroup
 	wg.Add(2) // Add 2 because we have 2 goroutines
@@ -68,9 +71,9 @@ func setupExchanges(ch *amqp.Channel) {
 }
 
 // setupLoggingQueue declares and binds the logging queue to the operations exchange
-func setupLoggingQueue(ch *amqp.Channel) amqp.Queue {
+func setupLoggingQueue(ch *amqp.Channel, adminId string) amqp.Queue {
 	loggingQueue, err := ch.QueueDeclare(
-		loggingQueueName,
+		loggingQueueName+"."+adminId,
 		true,
 		false,
 		false,
