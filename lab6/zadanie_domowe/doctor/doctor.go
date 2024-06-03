@@ -2,20 +2,23 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 	"log"
 	"math/rand"
 	"os"
+	"os/signal"
 	utils "rabbit"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 var operations = []string{"knee", "elbow", "hip"}
-var messages = []string{"Kowalski", "Nowak", "Chujak"}
+var messages = []string{"Kowalski", "Nowak", "Burak", "Kowal", "Kowalczyk", "Kowalewski", "Kowalewska", "Kowalik", "Kowalczuk", "Kowalak", "Kowalak"}
 
 type OperationType string
 
@@ -38,17 +41,28 @@ func main() {
 
 	setupExchanges(ch)
 	doctorQueueName := setupDoctorQueue(ch, doctorId)
-	adminQueueName := setupAdminQueue(ch)
+	adminQueueName := setupAdminQueue(ch, doctorId)
 
+	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(3)
 
-	go consumeDoctorQueue(&wg, ch, doctorQueueName)
-	//go publishMessages(&wg, ch, doctorId)
-	go consumeAdminQueue(&wg, ch, adminQueueName)
-	go manualMessageInput(&wg, ch, doctorId)
+	go consumeDoctorQueue(ctx, &wg, ch, doctorQueueName)
+	//go publishMessages(ctx, &wg, ch, doctorId)
+	go consumeAdminQueue(ctx, &wg, ch, adminQueueName)
+	go manualMessageInput(ctx, &wg, ch, doctorId)
 
-	wg.Wait() // Wait for all goroutines to finish
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		log.Println("Received interrupt signal, shutting down...")
+		cancel()
+	}()
+
+	wg.Wait()
+	log.Println("All goroutines finished, exiting.")
 }
 
 func setupExchanges(ch *amqp.Channel) {
@@ -99,9 +113,9 @@ func setupDoctorQueue(ch *amqp.Channel, doctorId string) string {
 	return doctorQueueName
 }
 
-func setupAdminQueue(ch *amqp.Channel) string {
+func setupAdminQueue(ch *amqp.Channel, id string) string {
 	q, err := ch.QueueDeclare(
-		"admin_queue_doctor",
+		"admin_queue_doctor"+id,
 		false,
 		false,
 		false,
@@ -122,7 +136,7 @@ func setupAdminQueue(ch *amqp.Channel) string {
 	return q.Name
 }
 
-func consumeDoctorQueue(wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
+func consumeDoctorQueue(ctx context.Context, wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
 	defer wg.Done()
 	msgs, err := ch.Consume(
 		queueName,
@@ -135,12 +149,21 @@ func consumeDoctorQueue(wg *sync.WaitGroup, ch *amqp.Channel, queueName string) 
 	)
 	utils.FailOnError(err, "Failed to register a consumer")
 
-	for d := range msgs {
-		log.Printf("Received a message from technic: %s", d.Body)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping consumeDoctorQueue...")
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				return
+			}
+			log.Printf("Received a message from technic: %s", d.Body)
+		}
 	}
 }
 
-func consumeAdminQueue(wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
+func consumeAdminQueue(ctx context.Context, wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
 	defer wg.Done()
 	msgs, err := ch.Consume(
 		queueName,
@@ -153,69 +176,90 @@ func consumeAdminQueue(wg *sync.WaitGroup, ch *amqp.Channel, queueName string) {
 	)
 	utils.FailOnError(err, "Failed to register a consumer")
 
-	for d := range msgs {
-		log.Printf("Admin message received: %s", d.Body)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping consumeAdminQueue...")
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				return
+			}
+			log.Printf("Admin message received: %s", d.Body)
+		}
 	}
 }
 
-func publishMessages(wg *sync.WaitGroup, ch *amqp.Channel, doctorId string) {
+func publishMessages(ctx context.Context, wg *sync.WaitGroup, ch *amqp.Channel, doctorId string) {
 	defer wg.Done()
 	for {
-		randomIndexOp := rand.Intn(len(operations))
-		randomIndexMsg := rand.Intn(len(messages))
-		randomOperation := operations[randomIndexOp]
-		randomName := messages[randomIndexMsg]
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping publishMessages...")
+			return
+		default:
+			randomIndexOp := rand.Intn(len(operations))
+			randomIndexMsg := rand.Intn(len(messages))
+			randomOperation := operations[randomIndexOp]
+			randomName := messages[randomIndexMsg]
 
-		utils.SendMessage(ch, utils.OperationsExchange, randomOperation, randomName+" "+randomOperation, doctorId, true)
-		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, randomName+" "+randomOperation, doctorId, false)
-		time.Sleep(10 * time.Second)
+			utils.SendMessage(ch, utils.OperationsExchange, randomOperation, randomName+" "+randomOperation, doctorId, true)
+			utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, randomName+" "+randomOperation, doctorId, false)
+			time.Sleep(2 * time.Second)
+		}
 	}
 }
 
-func manualMessageInput(wg *sync.WaitGroup, ch *amqp.Channel, doctorId string) {
+func manualMessageInput(ctx context.Context, wg *sync.WaitGroup, ch *amqp.Channel, doctorId string) {
 	defer wg.Done()
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Print("Enter the surname: ")
-		surname, err := reader.ReadString('\n')
-		utils.FailOnError(err, "Failed to read from stdin")
-
-		surname = strings.TrimSpace(surname)
-		if surname == "" {
-			log.Println("Surname cannot be empty. Please enter a valid surname.")
-			continue
-		}
-		operation := ""
-
-		for {
-			validInput := true
-			fmt.Println("Operation types:")
-			fmt.Println("1. Knee")
-			fmt.Println("2. Elbow")
-			fmt.Println("3. Hip")
-			fmt.Print("Enter the type of operation: ")
-
-			number, err := reader.ReadString('\n')
-			number = strings.TrimSpace(number)
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping manualMessageInput...")
+			return
+		default:
+			fmt.Print("Enter the surname: ")
+			surname, err := reader.ReadString('\n')
 			utils.FailOnError(err, "Failed to read from stdin")
-			switch number {
-			case "1":
-				operation = "knee"
-			case "2":
-				operation = "elbow"
-			case "3":
-				operation = "hip"
-			default:
-				fmt.Println("Invalid number:", number, ". Please choose 1, 2, or 3.")
-				validInput = false
-			}
-			if validInput {
-				break
-			}
-		}
 
-		message := surname + " " + operation
-		utils.SendMessage(ch, utils.OperationsExchange, operation, message, doctorId, true)
-		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, message, doctorId, false)
+			surname = strings.TrimSpace(surname)
+			if surname == "" {
+				log.Println("Surname cannot be empty. Please enter a valid surname.")
+				continue
+			}
+			operation := ""
+
+			for {
+				validInput := true
+				fmt.Println("Operation types:")
+				fmt.Println("1. Knee")
+				fmt.Println("2. Elbow")
+				fmt.Println("3. Hip")
+				fmt.Print("Enter the type of operation: ")
+
+				number, err := reader.ReadString('\n')
+				number = strings.TrimSpace(number)
+				utils.FailOnError(err, "Failed to read from stdin")
+				switch number {
+				case "1":
+					operation = "knee"
+				case "2":
+					operation = "elbow"
+				case "3":
+					operation = "hip"
+				default:
+					fmt.Println("Invalid number:", number, ". Please choose 1, 2, or 3.")
+					validInput = false
+				}
+				if validInput {
+					break
+				}
+			}
+
+			message := surname + " " + operation
+			utils.SendMessage(ch, utils.OperationsExchange, operation, message, doctorId, true)
+			utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY+".*", message, doctorId, false)
+		}
 	}
 }

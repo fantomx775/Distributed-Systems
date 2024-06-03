@@ -2,16 +2,19 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 	"log"
 	"math/rand"
 	"os"
+	"os/signal"
 	utils "rabbit"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -106,17 +109,39 @@ func main() {
 	msgs1 := consumeQueue(ch, queue1)
 	msgs2 := consumeQueue(ch, queue2)
 
-	rand.Seed(time.Now().UnixNano())
+	rand.NewSource(time.Now().UnixNano())
 	var mu sync.Mutex
 
-	go processMessages(msgs1, operation1, technicId, ch, &mu)
-	go processMessages(msgs2, operation2, technicId, ch, &mu)
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(3)
 
-	setupAdminExchange(ch)
-	adminQueue := setupAdminQueue(ch)
-	go consumeAdminQueue(ch, adminQueue)
+	go func() {
+		defer wg.Done()
+		processMessages(ctx, msgs1, operation1, technicId, ch, &mu)
+	}()
 
-	select {}
+	go func() {
+		defer wg.Done()
+		processMessages(ctx, msgs2, operation2, technicId, ch, &mu)
+	}()
+
+	go func() {
+		defer wg.Done()
+		consumeAdminQueue(ctx, ch, setupAdminQueue(ch, technicId))
+	}()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-c
+		log.Println("Received interrupt signal, shutting down...")
+		cancel()
+	}()
+
+	wg.Wait()
+	log.Println("All goroutines finished, exiting.")
 }
 
 func setupExchanges(ch *amqp.Channel) {
@@ -179,16 +204,23 @@ func consumeQueue(ch *amqp.Channel, queue amqp.Queue) <-chan amqp.Delivery {
 	return msgs
 }
 
-func processMessages(msgs <-chan amqp.Delivery, operation OperationType, technicId string, ch *amqp.Channel, mu *sync.Mutex) {
-	for d := range msgs {
-		mu.Lock()
-		log.Printf("Received a message: %s", d.Body)
-		//time.Sleep(time.Duration(rand.Intn(10)+1) * time.Second)
-		time.Sleep(20 * time.Second)
-		utils.SendMessage(ch, utils.OperationsExchange, d.ReplyTo, string(d.Body)+" DONE", technicId, true)
-		utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, string(d.Body)+" DONE", technicId, false)
-		d.Ack(false)
-		mu.Unlock()
+func processMessages(ctx context.Context, msgs <-chan amqp.Delivery, operation OperationType, technicId string, ch *amqp.Channel, mu *sync.Mutex) {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping processMessages...")
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				return
+			}
+			mu.Lock()
+			log.Printf("Received a message: %s", d.Body)
+			utils.SendMessage(ch, utils.OperationsExchange, d.ReplyTo, string(d.Body)+" DONE", technicId, true)
+			utils.SendMessage(ch, utils.OperationsExchange, utils.LOGGING_KEY, string(d.Body)+" DONE", technicId, false)
+			d.Ack(false)
+			mu.Unlock()
+		}
 	}
 }
 
@@ -205,9 +237,9 @@ func setupAdminExchange(ch *amqp.Channel) {
 	utils.FailOnError(err, "Failed to declare the administration exchange")
 }
 
-func setupAdminQueue(ch *amqp.Channel) amqp.Queue {
+func setupAdminQueue(ch *amqp.Channel, id string) amqp.Queue {
 	adminQueue, err := ch.QueueDeclare(
-		"admin_queue_technic",
+		"admin_queue_technic"+id,
 		false,
 		false,
 		false,
@@ -226,7 +258,7 @@ func setupAdminQueue(ch *amqp.Channel) amqp.Queue {
 	return adminQueue
 }
 
-func consumeAdminQueue(ch *amqp.Channel, adminQueue amqp.Queue) {
+func consumeAdminQueue(ctx context.Context, ch *amqp.Channel, adminQueue amqp.Queue) {
 	msgs, err := ch.Consume(
 		adminQueue.Name,
 		"",
@@ -238,7 +270,16 @@ func consumeAdminQueue(ch *amqp.Channel, adminQueue amqp.Queue) {
 	)
 	utils.FailOnError(err, "Failed to register a consumer for admin queue")
 
-	for d := range msgs {
-		log.Printf("Admin message received: %s", d.Body)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping consumeAdminQueue...")
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				return
+			}
+			log.Printf("Admin message received: %s", d.Body)
+		}
 	}
 }
