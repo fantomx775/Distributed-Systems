@@ -24,10 +24,31 @@ class ZookeeperApp:
     def init_zk(self):
         self.zk.start()
         self.zk.ensure_path("/a")
-        self.watch_all_descendants("/a")  # Rozpoczęcie monitorowania wszystkich potomków
+        self.watch_node("/a")  # Watch for changes on the root node
+        self.watch_all_descendants("/a")  # Start monitoring all descendants
+        self.start_external_app()
+
+    def watch_node(self, path):
+        @self.zk.DataWatch(path)
+        def watch_node(data, stat):
+            if stat is None:  # Node was deleted
+                print("Root node deleted, stopping external application and quitting Tkinter main loop.")
+                self.stop_external_app()
+                if self.root:
+                    self.root.quit()  # Exit the Tkinter main loop
+                self.wait_for_root_node()
+
+    def wait_for_root_node(self):
+        @self.zk.DataWatch("/a")
+        def watch_for_creation(data, stat):
+            if stat is not None:  # Node was created
+                print("Root node recreated, restarting external application and Tkinter main loop.")
+                self.init_zk()
+                if self.root:
+                    self.root = tk.Tk()
+                    self.run()
 
     def watch_all_descendants(self, path):
-        # Rekurencyjnie monitoruj wszystkich potomków
         @self.zk.ChildrenWatch(path)
         def watch_children(children):
             total_children = self.count_total_children("/a")
@@ -40,12 +61,18 @@ class ZookeeperApp:
 
     def start_external_app(self):
         print("Starting external application...")
-        self.external_app_process = subprocess.Popen(self.external_app_command, shell=True)
+        self.external_app_process = subprocess.Popen(self.external_app_command.split())
 
     def stop_external_app(self):
-        print("Stopping external application...")
-        self.external_app_process.terminate()
-        self.external_app_process = None
+        if self.external_app_process:
+            print("Stopping external application...")
+            self.external_app_process.terminate()
+            try:
+                self.external_app_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.external_app_process.kill()
+            self.external_app_process = None
+        print("External application stopped.")
 
     def count_total_children(self, path):
         total = 0
