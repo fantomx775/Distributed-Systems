@@ -1,0 +1,9 @@
+python main.py "localhost:2181,localhost:2182,localhost:2183" "mspaint.exe"
+
+zkCli.cmd -server localhost:2181
+zkCli.cmd -server localhost:2182
+zkCli.cmd -server localhost:2183
+
+zkServer2.cmd zoo1.cfg
+zkServer2.cmd zoo2.cfg
+zkServer2.cmd zoo3.cfg
