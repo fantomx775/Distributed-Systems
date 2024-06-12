@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import threading
 from kazoo.client import KazooClient
 from kazoo.client import KazooState
 import tkinter as tk
@@ -12,6 +13,7 @@ class ZookeeperApp:
         self.external_app_process = None
         self.root = None
         self.init_zk()
+        self.start_command_listener()
 
     def my_listener(self, state):
         if state == KazooState.LOST:
@@ -24,25 +26,25 @@ class ZookeeperApp:
     def init_zk(self):
         self.zk.start()
         self.zk.ensure_path("/a")
-        self.watch_node("/a")  # Watch for changes on the root node
-        self.watch_all_descendants("/a")  # Start monitoring all descendants
+        self.watch_node("/a")
+        self.watch_all_descendants("/a")
         self.start_external_app()
 
     def watch_node(self, path):
         @self.zk.DataWatch(path)
         def watch_node(data, stat):
-            if stat is None:  # Node was deleted
-                print("Root node deleted, stopping external application and quitting Tkinter main loop.")
+            if stat is None:
+                print(f"Node {path} deleted, stopping external application and quitting Tkinter main loop.")
                 self.stop_external_app()
                 if self.root:
-                    self.root.quit()  # Exit the Tkinter main loop
-                self.wait_for_root_node()
+                    self.root.quit()  #
+                self.wait_for_node_creation(path)
 
-    def wait_for_root_node(self):
-        @self.zk.DataWatch("/a")
+    def wait_for_node_creation(self, path):
+        @self.zk.DataWatch(path)
         def watch_for_creation(data, stat):
-            if stat is not None:  # Node was created
-                print("Root node recreated, restarting external application and Tkinter main loop.")
+            if stat is not None:
+                print(f"Node {path} recreated, restarting external application and Tkinter main loop.")
                 self.init_zk()
                 if self.root:
                     self.root = tk.Tk()
@@ -53,7 +55,6 @@ class ZookeeperApp:
         def watch_children(children):
             total_children = self.count_total_children("/a")
             self.show_children_count(total_children)
-            self.display_tree()
 
             for child in children:
                 child_path = f"{path}/{child}"
@@ -73,6 +74,7 @@ class ZookeeperApp:
                 self.external_app_process.kill()
             self.external_app_process = None
         print("External application stopped.")
+        sys.exit(1)
 
     def count_total_children(self, path):
         total = 0
@@ -95,13 +97,13 @@ class ZookeeperApp:
         label.pack(pady=20)
         self.root.update()
 
-    def display_tree(self):
-        print("Displaying tree structure:")
-        self.display_node("/a", first=True)
+    def display_tree(self, path="/a"):
+        print(f"Displaying tree structure for {path}:")
+        self.display_node(path, first=True)
 
     def display_node(self, path, prefix="", first=False):
         if first:
-            print('a')
+            print(path)
         children = self.zk.get_children(path)
         if children:
             for i, child in enumerate(children):
@@ -114,9 +116,26 @@ class ZookeeperApp:
                 print(next_prefix + child)
                 self.display_node(f"{path}/{child}", child_prefix)
 
+    def display_all_trees(self):
+        print("Displaying all tree structures:")
+        root_nodes = self.zk.get_children('/')
+        for node in root_nodes:
+            self.display_node(f"/{node}", first=True)
+
     def run(self):
         self.root.mainloop()
         self.zk.stop()
+
+    def start_command_listener(self):
+        threading.Thread(target=self.command_listener, daemon=True).start()
+
+    def command_listener(self):
+        while True:
+            command = input("Enter command: ")
+            if command.strip().lower() == "tree":
+                self.display_tree("/a")
+            elif command.strip().lower() == "treeall":
+                self.display_all_trees()
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
